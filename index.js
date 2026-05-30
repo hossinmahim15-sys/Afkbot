@@ -36,7 +36,7 @@ app.listen(PORT, '0.0.0.0', () => {
 const BOT_CONFIG = {
   host: process.env.MC_HOST || 'hypixel.net',
   port: parseInt(process.env.MC_PORT) || 25565,
-  username: process.env.MC_USERNAME || 'MyBot',
+  username: process.env.MC_USERNAME || 'Mahim8807',
   password: process.env.MC_PASSWORD || undefined,
   version: process.env.MC_VERSION || false,
   auth: process.env.MC_AUTH || 'microsoft',
