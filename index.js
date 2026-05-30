@@ -1,7 +1,7 @@
 const mineflayer = require('mineflayer');
 const express = require('express');
 
-// ─── Express Web Server (Replit alive রাখার জন্য) ───────────────────────────
+// ─── Express Web Server ───────────────────────────────────────────────────────
 const app = express();
 const PORT = 5000;
 
@@ -10,178 +10,124 @@ app.get('/', (req, res) => {
     <html>
       <head><title>Minecraft Bot</title></head>
       <body style="font-family:sans-serif;text-align:center;padding:50px;background:#1a1a2e;color:#eee">
-        <h1>🤖 Minecraft Bot চলছে!</h1>
+        <h1>Minecraft Bot চলছে!</h1>
         <p>Status: <span style="color:#00ff88">Online</span></p>
-        <p>Server: ${process.env.MC_HOST || 'Not configured'}</p>
-        <p>Bot: ${process.env.MC_USERNAME || 'Not configured'}</p>
+        <p>Server: ${process.env.MC_HOST || 'impm.aternos.me'}</p>
+        <p>Bot: ${process.env.MC_USERNAME || 'Mahim8807'}</p>
       </body>
     </html>
   `);
 });
+app.get('/status', (req, res) => res.json({ status: 'running', uptime: process.uptime() }));
+app.listen(PORT, '0.0.0.0', () => console.log(`Web server চালু: port ${PORT}`));
 
-app.get('/status', (req, res) => {
-  res.json({
-    status: 'running',
-    bot: process.env.MC_USERNAME || 'unknown',
-    server: process.env.MC_HOST || 'unknown',
-    uptime: process.uptime()
-  });
-});
-
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`✅ Web server চালু হয়েছে port ${PORT}-এ`);
-});
-
-// ─── Bot Configuration ────────────────────────────────────────────────────────
-const BOT_CONFIG = {
-  host: process.env.MC_HOST || 'hypixel.net',
-  port: parseInt(process.env.MC_PORT) || 25565,
-  username: process.env.MC_USERNAME || 'Mahim8807',
-  password: process.env.MC_PASSWORD || undefined,
-  version: process.env.MC_VERSION || false,
-  auth: process.env.MC_AUTH || 'microsoft',
-  reconnectDelay: parseInt(process.env.RECONNECT_DELAY) || 5000,
+// ─── Config ───────────────────────────────────────────────────────────────────
+const CFG = {
+  host:    process.env.MC_HOST          || 'impm.aternos.me',
+  port:    parseInt(process.env.MC_PORT) || 40248,
+  user:    process.env.MC_USERNAME       || 'Mahim8807',
+  version: process.env.MC_VERSION        || '1.21.1',
+  auth:    process.env.MC_AUTH           || 'offline',
+  delay:   parseInt(process.env.RECONNECT_DELAY) || 20000,
 };
 
-let bot = null;
-let reconnectTimer = null;
+let bot = null, reconnectTimer = null, afkTimer = null;
 
-// ─── Bot তৈরি করার ফাংশন ─────────────────────────────────────────────────────
+// ─── createBot ────────────────────────────────────────────────────────────────
 function createBot() {
-  console.log(`🔌 ${BOT_CONFIG.host}:${BOT_CONFIG.port}-এ কানেক্ট হচ্ছে...`);
+  console.log(`কানেক্ট হচ্ছে ${CFG.host}:${CFG.port} | user: ${CFG.user} | v${CFG.version}`);
 
   bot = mineflayer.createBot({
-    host: BOT_CONFIG.host,
-    port: BOT_CONFIG.port,
-    username: BOT_CONFIG.username,
-    password: BOT_CONFIG.password,
-    version: BOT_CONFIG.version,
-    auth: BOT_CONFIG.auth,
+    host:                 CFG.host,
+    port:                 CFG.port,
+    username:             CFG.user,
+    version:              CFG.version,
+    auth:                 CFG.auth,
+    checkTimeoutInterval: 60 * 1000,
+    hideErrors:           false,
   });
 
-  // ─── Spawn ─────────────────────────────────────────────────────────────────
-  bot.once('spawn', () => {
-    console.log(`✅ বট স্পন হয়েছে! Username: ${bot.username}`);
-    startAntiAFK();
+  // Login-এর সাথে সাথেই physics বন্ধ করো (Grim Anticheat fix)
+  bot._client.once('login', () => {
+    bot.physicsEnabled = false;
+    console.log('Physics disabled (chunks not loaded yet)');
   });
 
-  // ─── Chat ─────────────────────────────────────────────────────────────────
-  bot.on('chat', (username, message) => {
-    if (username === bot.username) return;
-    console.log(`💬 <${username}> ${message}`);
-    handleChatCommands(username, message);
-  });
-
-  // ─── Kick হলে ─────────────────────────────────────────────────────────────
-  bot.on('kicked', (reason) => {
-    console.log(`⚠️ বট kick হয়েছে: ${reason}`);
-    stopAntiAFK();
-    scheduleReconnect();
-  });
-
-  // ─── Error হলে ─────────────────────────────────────────────────────────────
-  bot.on('error', (err) => {
-    console.log(`❌ Error: ${err.message}`);
-    stopAntiAFK();
-    scheduleReconnect();
-  });
-
-  // ─── Disconnect হলে ────────────────────────────────────────────────────────
-  bot.on('end', (reason) => {
-    console.log(`🔴 সংযোগ বিচ্ছিন্ন: ${reason}`);
-    stopAntiAFK();
-    scheduleReconnect();
-  });
-
-  // ─── Death হলে ─────────────────────────────────────────────────────────────
-  bot.on('death', () => {
-    console.log('💀 বট মারা গেছে, respawn করছে...');
-    bot.respawn();
-  });
-
-  // ─── Health পরিবর্তন ──────────────────────────────────────────────────────
-  bot.on('health', () => {
-    if (bot.health <= 5) {
-      console.log(`⚠️ বটের HP কম: ${bot.health}/20`);
-    }
-  });
-}
-
-// ─── Chat Commands Handler ────────────────────────────────────────────────────
-function handleChatCommands(username, message) {
-  const lowerMsg = message.toLowerCase().trim();
-
-  if (lowerMsg === '!ping') {
-    bot.chat('Pong! 🏓 আমি ঠিকঠাক চলছি!');
-  } else if (lowerMsg === '!health') {
-    bot.chat(`❤️ HP: ${Math.round(bot.health)}/20 | 🍗 Food: ${Math.round(bot.food)}/20`);
-  } else if (lowerMsg === '!pos') {
-    const pos = bot.entity.position;
-    bot.chat(`📍 Position: X:${Math.round(pos.x)} Y:${Math.round(pos.y)} Z:${Math.round(pos.z)}`);
-  } else if (lowerMsg === '!time') {
-    const time = bot.time.timeOfDay;
-    const timeStr = time < 6000 ? 'ভোর' : time < 12000 ? 'দুপুর' : time < 18000 ? 'বিকেল' : 'রাত';
-    bot.chat(`⏰ এখন: ${timeStr} (${time} ticks)`);
-  } else if (lowerMsg === '!players') {
-    const players = Object.keys(bot.players).join(', ');
-    bot.chat(`👥 সার্ভারে আছেন: ${players || 'কেউ নেই'}`);
-  } else if (lowerMsg === '!help') {
-    bot.chat('📋 Commands: !ping, !health, !pos, !time, !players, !help');
-  }
-}
-
-// ─── Anti-AFK System ─────────────────────────────────────────────────────────
-let antiAFKInterval = null;
-let antiAFKRotation = 0;
-
-function startAntiAFK() {
-  if (antiAFKInterval) return;
-  console.log('🔄 Anti-AFK চালু হয়েছে');
-
-  antiAFKInterval = setInterval(() => {
-    if (!bot || !bot.entity) return;
-
-    antiAFKRotation += 1;
-    const action = antiAFKRotation % 4;
+  // ─── Spawn ───────────────────────────────────────────────────────────────
+  bot.once('spawn', async () => {
+    console.log(`স্পন হয়েছে! User: ${bot.username}`);
 
     try {
-      if (action === 0) {
-        bot.setControlState('jump', true);
-        setTimeout(() => bot && bot.setControlState('jump', false), 500);
-      } else if (action === 1) {
-        bot.look(bot.entity.yaw + 0.5, bot.entity.pitch, false);
-      } else if (action === 2) {
-        bot.look(bot.entity.yaw - 0.5, bot.entity.pitch, false);
-      } else {
-        bot.swingArm('right');
-      }
-    } catch (e) {
-      // ignore
+      // chunk load হওয়া পর্যন্ত অপেক্ষা করো
+      await bot.waitForChunksToLoad();
+      console.log('Chunks লোড হয়েছে — physics চালু করছি');
+    } catch(_) {}
+
+    // এখন ground সেট করে physics চালু করো
+    if (bot.entity) {
+      bot.entity.onGround = true;
+      bot.entity.velocity.set(0, 0, 0);
     }
+    bot.physicsEnabled = true;
+
+    // সব control state বন্ধ
+    ['forward','back','left','right','jump','sprint','sneak'].forEach(s => {
+      try { bot.setControlState(s, false); } catch(_) {}
+    });
+
+    console.log('Bot সার্ভারে সক্রিয়!');
+    // 20 সেকেন্ড পর Anti-AFK শুরু
+    afkTimer = setTimeout(startAFK, 20000);
+  });
+
+  // ─── Chat ────────────────────────────────────────────────────────────────
+  bot.on('chat', (user, msg) => {
+    if (user === bot.username) return;
+    const m = msg.toLowerCase();
+    if (m === '!ping')    bot.chat('Pong!');
+    if (m === '!health')  bot.chat(`HP: ${Math.round(bot.health)}/20`);
+    if (m === '!pos')     { const p = bot.entity.position; bot.chat(`${Math.round(p.x)} ${Math.round(p.y)} ${Math.round(p.z)}`); }
+    if (m === '!players') bot.chat(Object.keys(bot.players).join(', '));
+  });
+
+  // ─── Death ───────────────────────────────────────────────────────────────
+  bot.on('death', () => { console.log('মারা গেছে, respawn...'); bot.respawn(); });
+
+  // ─── Kick / Error / End ──────────────────────────────────────────────────
+  const cleanup = (label, reason) => {
+    let msg = typeof reason === 'string' ? reason : JSON.stringify(reason);
+    console.log(`[${label}] ${msg}`);
+    stopAFK();
+    reconnect();
+  };
+  bot.on('kicked', (r) => cleanup('KICK', r));
+  bot.on('error',  (e) => cleanup('ERR',  e.message));
+  bot.on('end',    (r) => cleanup('END',  r));
+}
+
+// ─── Anti-AFK (শুধু মাথা ঘোরানো) ─────────────────────────────────────────────
+let afkInterval = null, afkTick = 0;
+function startAFK() {
+  if (afkInterval) return;
+  console.log('Anti-AFK চালু');
+  afkInterval = setInterval(() => {
+    if (!bot || !bot.entity) return;
+    afkTick++;
+    try { bot.look(bot.entity.yaw + (afkTick % 2 === 0 ? 0.4 : -0.4), 0, true); } catch(_) {}
   }, 30000);
 }
-
-function stopAntiAFK() {
-  if (antiAFKInterval) {
-    clearInterval(antiAFKInterval);
-    antiAFKInterval = null;
-    console.log('⏹️ Anti-AFK বন্ধ হয়েছে');
-  }
+function stopAFK() {
+  if (afkTimer)    { clearTimeout(afkTimer);    afkTimer = null; }
+  if (afkInterval) { clearInterval(afkInterval); afkInterval = null; }
 }
 
-// ─── Auto-Reconnect ───────────────────────────────────────────────────────────
-function scheduleReconnect() {
+// ─── Reconnect ────────────────────────────────────────────────────────────────
+function reconnect() {
   if (reconnectTimer) return;
-  console.log(`🔁 ${BOT_CONFIG.reconnectDelay / 1000} সেকেন্ড পরে পুনরায় কানেক্ট হবে...`);
-
-  reconnectTimer = setTimeout(() => {
-    reconnectTimer = null;
-    createBot();
-  }, BOT_CONFIG.reconnectDelay);
+  console.log(`${CFG.delay / 1000}s পরে রিকানেক্ট...`);
+  reconnectTimer = setTimeout(() => { reconnectTimer = null; createBot(); }, CFG.delay);
 }
 
-// ─── Start ───────────────────────────────────────────────────────────────────
-console.log('🚀 Minecraft Bot শুরু হচ্ছে...');
-console.log(`📡 Server: ${BOT_CONFIG.host}:${BOT_CONFIG.port}`);
-console.log(`👤 Username: ${BOT_CONFIG.username}`);
+// ─── Start ────────────────────────────────────────────────────────────────────
+console.log(`Bot শুরু: ${CFG.host}:${CFG.port}`);
 createBot();
