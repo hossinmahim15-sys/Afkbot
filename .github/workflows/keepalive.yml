@@ -1,0 +1,21 @@
+name: Keep Replit Alive
+
+on:
+  schedule:
+    - cron: '*/4 * * * *'   # প্রতি ৪ মিনিট পর পর
+  workflow_dispatch:          # হাতে চালানোর সুবিধার জন্য
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Replit
+        run: |
+          echo "⏰ Pinging Replit at $(date)"
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 "${{ secrets.REPLIT_URL }}")
+          echo "📡 HTTP Status: $STATUS"
+          if [ "$STATUS" -ge 200 ] && [ "$STATUS" -lt 400 ]; then
+            echo "✅ Replit সচল আছে!"
+          else
+            echo "⚠️ Replit সাড়া দেয়নি (status: $STATUS)"
+          fi
